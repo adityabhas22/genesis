@@ -2,6 +2,9 @@ import argparse
 import os
 import pickle
 import shutil
+import torch
+import torch.nn as nn
+
 from importlib import metadata
 
 try:
@@ -145,11 +148,62 @@ def get_cfgs():
     return env_cfg, obs_cfg, reward_cfg, command_cfg
 
 
+class PolicyWrapper(nn.Module):
+    """
+    Simple wrapper so the exported TorchScript model has a clean
+    forward(obs) -> actions interface.
+    """
+    def __init__(self, actor_critic: nn.Module):
+        super().__init__()
+        self.actor_critic = actor_critic
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        # obs: (batch_size, obs_dim)
+        # act_inference gives the *mean* action (deterministic)
+        return self.actor_critic.act_inference(obs)
+
+
+def export_policy_as_jit(actor_critic: nn.Module,
+                         obs_dim: int,
+                         export_dir: str) -> str:
+    """
+    Export the trained RSL-RL policy as a TorchScript model.
+
+    - Input:  (1, obs_dim) float32 tensor
+    - Output: (1, 12) float32 tensor (joint position commands)
+    """
+    os.makedirs(export_dir, exist_ok=True)
+
+    # Move to CPU for deployment
+    actor_critic_cpu = actor_critic.to("cpu").eval()
+
+    wrapper = PolicyWrapper(actor_critic_cpu)
+
+    # Dummy input just to help TorchScript type inference
+    dummy_obs = torch.zeros(1, obs_dim, dtype=torch.float32)
+
+    with torch.no_grad():
+        _ = wrapper(dummy_obs)
+
+    scripted = torch.jit.script(wrapper)
+
+    export_path = os.path.join(export_dir, "policy.pt")
+    scripted.save(export_path)
+
+    print(f"[export] TorchScript policy saved to: {export_path}")
+    return export_path
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name", type=str, default="go2-walking")
     parser.add_argument("-B", "--num_envs", type=int, default=4096)
     parser.add_argument("--max_iterations", type=int, default=101)
+    parser.add_argument(
+        "--export_policy",
+        action="store_true",
+        help="Export TorchScript policy after training",
+    )
     args = parser.parse_args()
 
     gs.init(logging_level="warning")
@@ -174,6 +228,18 @@ def main():
     runner = OnPolicyRunner(env, train_cfg, log_dir, device=gs.device)
 
     runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
+
+        # ------------------------------------------------------------------
+    # Export trained policy as TorchScript for deployment (optional)
+    # ------------------------------------------------------------------
+    if args.export_policy:
+        obs_dim = obs_cfg["num_obs"]        # 45 in your current config
+        export_dir = os.path.join(log_dir, "exported")
+
+        # PPO is stored in runner.alg, actor-critic network in .actor_critic
+        actor_critic = runner.alg.actor_critic
+
+        export_policy_as_jit(actor_critic, obs_dim, export_dir)
 
 
 if __name__ == "__main__":
