@@ -107,11 +107,12 @@ def get_cfgs():
         # termination
         "termination_if_roll_greater_than": 10,  # degree
         "termination_if_pitch_greater_than": 10,
+        "termination_if_height_below": 0.18,  # m
         # base pose
         "base_init_pos": [0.0, 0.0, 0.42],
         "base_init_quat": [1.0, 0.0, 0.0, 0.0],
         "episode_length_s": 20.0,
-        "resampling_time_s": 4.0,
+        "resampling_time_s": 2.0,
         "action_scale": 0.25,
         "simulate_action_latency": True,
         "clip_actions": 100.0,
@@ -132,17 +133,21 @@ def get_cfgs():
         "reward_scales": {
             "tracking_lin_vel": 1.0,
             "tracking_ang_vel": 0.2,
+            "forward_speed": 2.0,
+            "heading_align": 0.5,
+            "lateral_drift": -0.2,
+            "ang_vel_xy": -0.05,
             "lin_vel_z": -1.0,
             "base_height": -50.0,
-            "action_rate": -0.005,
-            "similar_to_default": -0.1,
+            "action_rate": -0.003,
+            "similar_to_default": -0.08,
         },
     }
     command_cfg = {
         "num_commands": 3,
-        "lin_vel_x_range": [0.5, 0.5],
-        "lin_vel_y_range": [0, 0],
-        "ang_vel_range": [0, 0],
+        "lin_vel_x_range": [0.4, 2.0],
+        "lin_vel_y_range": [0.0, 0.0],
+        "ang_vel_range": [-0.5, 0.5],
     }
 
     return env_cfg, obs_cfg, reward_cfg, command_cfg

@@ -155,6 +155,7 @@ class Go2Env:
         self.reset_buf = self.episode_length_buf > self.max_episode_length
         self.reset_buf |= torch.abs(self.base_euler[:, 1]) > self.env_cfg["termination_if_pitch_greater_than"]
         self.reset_buf |= torch.abs(self.base_euler[:, 0]) > self.env_cfg["termination_if_roll_greater_than"]
+        self.reset_buf |= self.base_pos[:, 2] < self.env_cfg["termination_if_height_below"]
 
         time_out_idx = (self.episode_length_buf > self.max_episode_length).nonzero(as_tuple=False).reshape((-1,))
         self.extras["time_outs"] = torch.zeros_like(self.reset_buf, device=gs.device, dtype=gs.tc_float)
@@ -250,6 +251,25 @@ class Go2Env:
         # Tracking of angular velocity commands (yaw)
         ang_vel_error = torch.square(self.commands[:, 2] - self.base_ang_vel[:, 2])
         return torch.exp(-ang_vel_error / self.reward_cfg["tracking_sigma"])
+
+    def _reward_forward_speed(self):
+        # Encourage higher forward speed (positive x direction)
+        return torch.clamp(self.base_lin_vel[:, 0], min=0.0)
+
+    def _reward_heading_align(self):
+        # Align base velocity with commanded heading
+        cmd = self.commands[:, :2]
+        vel = self.base_lin_vel[:, :2]
+        denom = torch.clamp(torch.norm(cmd, dim=1) * torch.norm(vel, dim=1), min=1e-6)
+        return torch.sum(cmd * vel, dim=1) / denom
+
+    def _reward_lateral_drift(self):
+        # Penalize sideways velocity
+        return torch.abs(self.base_lin_vel[:, 1])
+
+    def _reward_ang_vel_xy(self):
+        # Penalize roll/pitch angular velocity
+        return torch.sum(torch.square(self.base_ang_vel[:, :2]), dim=1)
 
     def _reward_lin_vel_z(self):
         # Penalize z axis base linear velocity
